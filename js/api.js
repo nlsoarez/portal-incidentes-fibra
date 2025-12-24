@@ -1,11 +1,13 @@
 class IncidentAPI {
     constructor() {
-        // URL original da API (para referência)
+        // URL original da API
         this.originalApiUrl = 'http://10.29.5.216/scr/sgo_incidentes_abertos.php';
 
-        // Usar proxy local para evitar problemas de CORS
-        // O proxy.php deve estar no mesmo servidor que serve esta página
-        this.proxyUrl = this.getProxyUrl();
+        // Configuração do ambiente
+        this.environment = this.detectEnvironment();
+
+        // URL do proxy (pode ser configurado externamente)
+        this.externalProxyUrl = localStorage.getItem('externalProxyUrl') || null;
 
         this.lastFetch = null;
         this.cacheDuration = 300000; // 5 minutos
@@ -16,19 +18,48 @@ class IncidentAPI {
             states: ['SP', 'PR', 'SC', 'RS'],
             cities: ['SÃO PAULO', 'CURITIBA', 'PORTO ALEGRE', 'FLORIANÓPOLIS']
         };
+
+        // Log do ambiente detectado
+        console.log('Ambiente detectado:', this.environment);
     }
 
-    // Determina a URL do proxy baseado no ambiente
-    getProxyUrl() {
-        // Se estiver rodando localmente (file://), usar URL absoluta
-        if (window.location.protocol === 'file:') {
-            console.warn('Executando via file:// - o proxy PHP não funcionará. Use um servidor web.');
-            return null;
+    // Detecta o ambiente de execução
+    detectEnvironment() {
+        const hostname = window.location.hostname;
+        const protocol = window.location.protocol;
+
+        if (protocol === 'file:') {
+            return { type: 'file', supportsProxy: false };
         }
 
-        // Construir URL do proxy relativa ao documento atual
-        const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
-        return `${baseUrl}/proxy.php`;
+        if (hostname.includes('github.io') || hostname.includes('netlify') || hostname.includes('vercel')) {
+            return { type: 'static-hosting', supportsProxy: false, host: hostname };
+        }
+
+        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.match(/^10\./) || hostname.match(/^192\.168\./)) {
+            return { type: 'local-server', supportsProxy: true };
+        }
+
+        return { type: 'unknown', supportsProxy: true };
+    }
+
+    // Determina a melhor URL para buscar dados
+    getApiUrl() {
+        // Se tem proxy externo configurado, usar ele
+        if (this.externalProxyUrl) {
+            console.log('Usando proxy externo configurado:', this.externalProxyUrl);
+            return this.externalProxyUrl;
+        }
+
+        // Se o ambiente suporta proxy PHP local
+        if (this.environment.supportsProxy) {
+            const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
+            return `${baseUrl}/proxy.php`;
+        }
+
+        // Ambiente estático (GitHub Pages, etc) - tentar API direta
+        console.warn('Ambiente de hospedagem estática detectado. O proxy PHP não funciona aqui.');
+        return this.originalApiUrl;
     }
 
     async fetchData() {
@@ -42,47 +73,33 @@ class IncidentAPI {
                 return this.cachedData;
             }
 
-            // Verificar se o proxy está disponível
-            if (!this.proxyUrl) {
-                console.warn('Proxy não disponível, usando dados de exemplo');
+            const apiUrl = this.getApiUrl();
+            console.log('Fazendo requisição para:', apiUrl);
+
+            // Tentar buscar dados
+            let data = null;
+            let lastError = null;
+
+            // Tentativa 1: URL configurada (proxy ou direta)
+            try {
+                data = await this.tryFetch(apiUrl);
+            } catch (error) {
+                console.warn('Falha na tentativa principal:', error.message);
+                lastError = error;
+            }
+
+            // Se falhou e estamos em hospedagem estática, mostrar erro específico
+            if (!data && !this.environment.supportsProxy && !this.externalProxyUrl) {
+                throw new Error(
+                    'STATIC_HOSTING: Este site está hospedado no GitHub Pages que não suporta PHP. ' +
+                    'Configure um proxy externo nas configurações ou hospede em um servidor com PHP.'
+                );
+            }
+
+            // Se ainda não temos dados, usar dados de exemplo
+            if (!data) {
+                console.warn('Usando dados de exemplo devido a falha na API');
                 return await this.getSampleData();
-            }
-
-            console.log('Fazendo requisição para:', this.proxyUrl);
-
-            // Fazer requisição para o proxy local (evita problemas de CORS)
-            const response = await fetch(this.proxyUrl, {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json'
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`Erro na API: ${response.status} ${response.statusText}`);
-            }
-
-            const responseData = await response.json();
-
-            // O proxy retorna { success, data, proxy_info }
-            // Precisamos extrair o array de dados
-            let data;
-            if (responseData.success && responseData.data) {
-                // Resposta do proxy com estrutura wrapper
-                data = Array.isArray(responseData.data) ? responseData.data : [responseData.data];
-                console.log('Dados recebidos via proxy:', data.length, 'incidentes');
-            } else if (responseData.error) {
-                // Erro retornado pelo proxy
-                throw new Error(responseData.message || 'Erro desconhecido do proxy');
-            } else if (Array.isArray(responseData)) {
-                // Resposta direta (caso a API seja acessada diretamente)
-                data = responseData;
-            } else {
-                // Tentar usar a resposta diretamente se for um objeto com dados
-                data = responseData.data || responseData;
-                if (!Array.isArray(data)) {
-                    data = [data];
-                }
             }
 
             // Cache dos dados
@@ -95,9 +112,82 @@ class IncidentAPI {
         } catch (error) {
             console.error('Erro ao buscar dados:', error);
 
+            // Propagar erro específico de hospedagem estática
+            if (error.message.includes('STATIC_HOSTING')) {
+                throw error;
+            }
+
             // Tentar usar dados de exemplo se a API falhar
             return await this.getSampleData();
         }
+    }
+
+    async tryFetch(url) {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`Erro HTTP: ${response.status} ${response.statusText}`);
+        }
+
+        // Verificar se a resposta é JSON ou PHP (texto)
+        const contentType = response.headers.get('content-type') || '';
+        const text = await response.text();
+
+        // Se começa com <?php, o servidor não está executando PHP
+        if (text.trim().startsWith('<?php') || text.trim().startsWith('<?')) {
+            throw new Error('O servidor retornou código PHP ao invés de JSON. O PHP não está sendo executado.');
+        }
+
+        // Tentar parsear como JSON
+        let responseData;
+        try {
+            responseData = JSON.parse(text);
+        } catch (e) {
+            throw new Error('Resposta inválida: não é JSON válido');
+        }
+
+        // Processar resposta do proxy ou direta
+        let data;
+        if (responseData.success && responseData.data) {
+            // Resposta do proxy com estrutura wrapper
+            data = Array.isArray(responseData.data) ? responseData.data : [responseData.data];
+            console.log('Dados recebidos via proxy:', data.length, 'incidentes');
+        } else if (responseData.error) {
+            // Erro retornado pelo proxy
+            throw new Error(responseData.message || 'Erro desconhecido do proxy');
+        } else if (Array.isArray(responseData)) {
+            // Resposta direta da API
+            data = responseData;
+        } else {
+            // Tentar usar a resposta diretamente
+            data = responseData.data || responseData;
+            if (!Array.isArray(data)) {
+                data = [data];
+            }
+        }
+
+        return data;
+    }
+
+    // Configurar proxy externo
+    setExternalProxy(url) {
+        if (url && url.trim()) {
+            this.externalProxyUrl = url.trim();
+            localStorage.setItem('externalProxyUrl', this.externalProxyUrl);
+            console.log('Proxy externo configurado:', this.externalProxyUrl);
+        } else {
+            this.externalProxyUrl = null;
+            localStorage.removeItem('externalProxyUrl');
+            console.log('Proxy externo removido');
+        }
+        // Limpar cache para forçar nova requisição
+        this.cachedData = null;
+        this.lastFetch = null;
     }
 
     // Filtra apenas incidentes de FIBRA e exclui regiões
