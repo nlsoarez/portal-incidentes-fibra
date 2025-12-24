@@ -1,10 +1,16 @@
 class IncidentAPI {
     constructor() {
-        this.apiUrl = 'http://10.29.5.216/scr/sgo_incidentes_abertos.php';
+        // URL original da API (para referência)
+        this.originalApiUrl = 'http://10.29.5.216/scr/sgo_incidentes_abertos.php';
+
+        // Usar proxy local para evitar problemas de CORS
+        // O proxy.php deve estar no mesmo servidor que serve esta página
+        this.proxyUrl = this.getProxyUrl();
+
         this.lastFetch = null;
         this.cacheDuration = 300000; // 5 minutos
         this.cachedData = null;
-        
+
         // Regiões para excluir
         this.excludedRegions = {
             states: ['SP', 'PR', 'SC', 'RS'],
@@ -12,43 +18,83 @@ class IncidentAPI {
         };
     }
 
+    // Determina a URL do proxy baseado no ambiente
+    getProxyUrl() {
+        // Se estiver rodando localmente (file://), usar URL absoluta
+        if (window.location.protocol === 'file:') {
+            console.warn('Executando via file:// - o proxy PHP não funcionará. Use um servidor web.');
+            return null;
+        }
+
+        // Construir URL do proxy relativa ao documento atual
+        const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
+        return `${baseUrl}/proxy.php`;
+    }
+
     async fetchData() {
         try {
             console.log('Buscando dados da API...');
-            
+
             // Verificar cache
-            if (this.cachedData && this.lastFetch && 
+            if (this.cachedData && this.lastFetch &&
                 (Date.now() - this.lastFetch) < this.cacheDuration) {
                 console.log('Usando dados em cache');
                 return this.cachedData;
             }
 
-            // Fazer requisição para a API
-            const response = await fetch(this.apiUrl, {
+            // Verificar se o proxy está disponível
+            if (!this.proxyUrl) {
+                console.warn('Proxy não disponível, usando dados de exemplo');
+                return await this.getSampleData();
+            }
+
+            console.log('Fazendo requisição para:', this.proxyUrl);
+
+            // Fazer requisição para o proxy local (evita problemas de CORS)
+            const response = await fetch(this.proxyUrl, {
                 method: 'GET',
                 headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                },
-                mode: 'cors' // Nota: Pode precisar de proxy CORS
+                    'Accept': 'application/json'
+                }
             });
 
             if (!response.ok) {
                 throw new Error(`Erro na API: ${response.status} ${response.statusText}`);
             }
 
-            const data = await response.json();
-            
+            const responseData = await response.json();
+
+            // O proxy retorna { success, data, proxy_info }
+            // Precisamos extrair o array de dados
+            let data;
+            if (responseData.success && responseData.data) {
+                // Resposta do proxy com estrutura wrapper
+                data = Array.isArray(responseData.data) ? responseData.data : [responseData.data];
+                console.log('Dados recebidos via proxy:', data.length, 'incidentes');
+            } else if (responseData.error) {
+                // Erro retornado pelo proxy
+                throw new Error(responseData.message || 'Erro desconhecido do proxy');
+            } else if (Array.isArray(responseData)) {
+                // Resposta direta (caso a API seja acessada diretamente)
+                data = responseData;
+            } else {
+                // Tentar usar a resposta diretamente se for um objeto com dados
+                data = responseData.data || responseData;
+                if (!Array.isArray(data)) {
+                    data = [data];
+                }
+            }
+
             // Cache dos dados
             this.cachedData = data;
             this.lastFetch = Date.now();
-            
-            console.log(`Dados recebidos: ${data.length} incidentes`);
+
+            console.log(`Dados processados: ${data.length} incidentes`);
             return data;
-            
+
         } catch (error) {
             console.error('Erro ao buscar dados:', error);
-            
+
             // Tentar usar dados de exemplo se a API falhar
             return await this.getSampleData();
         }
@@ -179,12 +225,16 @@ class IncidentAPI {
     // Atualizar configurações
     updateSettings(settings) {
         if (settings.apiUrl) {
-            this.apiUrl = settings.apiUrl;
+            this.originalApiUrl = settings.apiUrl;
         }
-        
+
         if (settings.excludedRegions) {
             this.excludedRegions = settings.excludedRegions;
         }
+
+        // Limpar cache ao atualizar configurações
+        this.cachedData = null;
+        this.lastFetch = null;
     }
 
     // Verificar novos incidentes
