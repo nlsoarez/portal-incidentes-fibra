@@ -14,6 +14,7 @@ class IncidentMonitorApp {
                 period: '24h'
             },
             settings: {
+                // URL original da API (o proxy.php usará esta URL internamente)
                 apiUrl: 'http://10.29.5.216/scr/sgo_incidentes_abertos.php',
                 refreshInterval: 5,
                 excludedRegions: {
@@ -23,7 +24,8 @@ class IncidentMonitorApp {
             },
             autoRefresh: true,
             pageSize: 20,
-            currentPage: 1
+            currentPage: 1,
+            lastError: null
         };
         
         // Elementos DOM
@@ -116,38 +118,69 @@ class IncidentMonitorApp {
     async refreshData() {
         try {
             this.showLoading(true);
-            
+            this.state.lastError = null;
+
             // Atualizar timestamp
             this.updateLastUpdateTime();
-            
+
             // Buscar dados
+            console.log('Iniciando busca de dados...');
             const allData = await this.api.fetchData();
-            
+
+            // Verificar se recebemos dados válidos
+            if (!allData || !Array.isArray(allData)) {
+                throw new Error('Dados inválidos recebidos da API');
+            }
+
+            console.log(`Recebidos ${allData.length} registros da API`);
+
             // Filtrar apenas FIBRA
             const fiberData = this.api.filterFiberIncidents(allData);
-            
+            console.log(`${fiberData.length} incidentes de FIBRA após filtro`);
+
             // Verificar novos incidentes
             const newIncidents = this.api.findNewIncidents(fiberData, this.state.previousData);
-            
+
             // Atualizar estado
             this.state.previousData = [...this.state.currentData];
             this.state.currentData = fiberData;
             this.state.filteredData = this.applyCurrentFilters(fiberData);
-            
+
             // Atualizar interface
             this.updateKPIs();
             this.updateCharts();
             this.updateTable();
             this.updateNewIncidents(newIncidents);
             this.updateAlertTimeline(newIncidents);
-            
+
             // Atualizar conexão
             this.updateConnectionStatus(true);
-            
+
+            // Mostrar sucesso se houver dados
+            if (fiberData.length > 0) {
+                console.log('Dados carregados com sucesso!');
+            } else {
+                this.showWarning('Nenhum incidente de FIBRA encontrado com os filtros atuais.');
+            }
+
         } catch (error) {
             console.error('Erro ao atualizar dados:', error);
+            this.state.lastError = error.message;
             this.updateConnectionStatus(false);
-            this.showError('Erro ao carregar dados. Verifique a conexão com a API.');
+
+            // Mensagem de erro mais informativa
+            let errorMessage = 'Erro ao carregar dados. ';
+            if (error.message.includes('VPN')) {
+                errorMessage += 'Verifique se a VPN está conectada.';
+            } else if (error.message.includes('timeout') || error.message.includes('Timeout')) {
+                errorMessage += 'A API demorou muito para responder.';
+            } else if (error.message.includes('proxy')) {
+                errorMessage += 'O proxy não está acessível. Verifique se o servidor PHP está rodando.';
+            } else {
+                errorMessage += error.message || 'Verifique a conexão com a API.';
+            }
+
+            this.showError(errorMessage);
         } finally {
             this.showLoading(false);
         }
