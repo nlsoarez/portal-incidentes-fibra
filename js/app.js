@@ -84,6 +84,7 @@ class IncidentMonitorApp {
             excludeSul: document.getElementById('exclude-sul'),
             excludeParana: document.getElementById('exclude-parana'),
             apiUrl: document.getElementById('api-url'),
+            proxyUrl: document.getElementById('proxy-url'),
             refreshInterval: document.getElementById('refresh-interval'),
             saveSettings: document.getElementById('save-settings'),
             
@@ -170,10 +171,17 @@ class IncidentMonitorApp {
 
             // Mensagem de erro mais informativa
             let errorMessage = 'Erro ao carregar dados. ';
-            if (error.message.includes('VPN')) {
+
+            if (error.message.includes('STATIC_HOSTING')) {
+                // Erro específico de GitHub Pages / hospedagem estática
+                this.showStaticHostingError();
+                return;
+            } else if (error.message.includes('VPN')) {
                 errorMessage += 'Verifique se a VPN está conectada.';
             } else if (error.message.includes('timeout') || error.message.includes('Timeout')) {
                 errorMessage += 'A API demorou muito para responder.';
+            } else if (error.message.includes('PHP')) {
+                errorMessage += 'O servidor não está executando PHP. Verifique a configuração do servidor.';
             } else if (error.message.includes('proxy')) {
                 errorMessage += 'O proxy não está acessível. Verifique se o servidor PHP está rodando.';
             } else {
@@ -183,6 +191,51 @@ class IncidentMonitorApp {
             this.showError(errorMessage);
         } finally {
             this.showLoading(false);
+        }
+    }
+
+    showStaticHostingError() {
+        const alertHtml = `
+            <div class="alert alert-warning alert-dismissible fade show m-3" role="alert" id="static-hosting-alert">
+                <h5><i class="fas fa-exclamation-triangle me-2"></i>Hospedagem Estática Detectada</h5>
+                <p>Este site está hospedado no <strong>GitHub Pages</strong>, que não suporta PHP.</p>
+                <p>Para conectar à API, você precisa de uma das seguintes opções:</p>
+                <ol>
+                    <li><strong>Hospedar o proxy.php em um servidor com PHP</strong> (ex: servidor interno da empresa, VPS, etc.)</li>
+                    <li><strong>Rodar localmente</strong> usando <code>php -S localhost:8000</code></li>
+                </ol>
+                <hr>
+                <div class="mb-3">
+                    <label class="form-label"><strong>URL do Proxy Externo:</strong></label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="external-proxy-url"
+                               placeholder="http://seu-servidor.com/proxy.php"
+                               value="${this.api.externalProxyUrl || ''}">
+                        <button class="btn btn-primary" type="button" id="save-external-proxy">
+                            <i class="fas fa-save me-1"></i>Salvar e Testar
+                        </button>
+                    </div>
+                    <small class="text-muted">Configure a URL de um proxy que tenha acesso à rede interna (VPN)</small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+
+        // Remover alerta anterior se existir
+        const existingAlert = document.getElementById('static-hosting-alert');
+        if (existingAlert) existingAlert.remove();
+
+        // Inserir no topo do container principal
+        const mainContainer = document.querySelector('.container-fluid.mt-4');
+        if (mainContainer) {
+            mainContainer.insertAdjacentHTML('afterbegin', alertHtml);
+
+            // Adicionar evento ao botão
+            document.getElementById('save-external-proxy').addEventListener('click', () => {
+                const proxyUrl = document.getElementById('external-proxy-url').value;
+                this.api.setExternalProxy(proxyUrl);
+                this.refreshData();
+            });
         }
     }
 
@@ -504,24 +557,25 @@ class IncidentMonitorApp {
         // Atualizar configurações do estado
         this.state.settings = {
             apiUrl: this.elements.apiUrl.value,
+            proxyUrl: this.elements.proxyUrl.value,
             refreshInterval: parseInt(this.elements.refreshInterval.value),
             excludedRegions: {
                 states: [],
                 cities: []
             }
         };
-        
+
         // Configurar exclusões
         if (this.elements.excludeSP.checked) {
             this.state.settings.excludedRegions.states.push('SP');
             this.state.settings.excludedRegions.cities.push('SÃO PAULO');
         }
-        
+
         if (this.elements.excludeSul.checked) {
             this.state.settings.excludedRegions.states.push('PR', 'SC', 'RS');
             this.state.settings.excludedRegions.cities.push('CURITIBA', 'PORTO ALEGRE', 'FLORIANÓPOLIS');
         }
-        
+
         if (this.elements.excludeParana.checked) {
             if (!this.state.settings.excludedRegions.states.includes('PR')) {
                 this.state.settings.excludedRegions.states.push('PR');
@@ -530,37 +584,47 @@ class IncidentMonitorApp {
                 this.state.settings.excludedRegions.cities.push('CURITIBA');
             }
         }
-        
+
         // Salvar no localStorage
         localStorage.setItem('incidentMonitorSettings', JSON.stringify(this.state.settings));
-        
+
         // Aplicar configurações
         this.api.updateSettings(this.state.settings);
-        
+
+        // Configurar proxy externo se fornecido
+        this.api.setExternalProxy(this.state.settings.proxyUrl);
+
         // Reiniciar auto-refresh com novo intervalo
         this.startAutoRefresh();
-        
+
         // Mostrar mensagem de sucesso
         this.showSuccess('Configurações salvas com sucesso!');
-        
+
         // Recarregar dados
         this.refreshData();
     }
 
     applyLoadedSettings() {
         // Aplicar configurações carregadas aos elementos
-        this.elements.apiUrl.value = this.state.settings.apiUrl;
-        this.elements.refreshInterval.value = this.state.settings.refreshInterval;
-        
+        this.elements.apiUrl.value = this.state.settings.apiUrl || '';
+        this.elements.proxyUrl.value = this.state.settings.proxyUrl || '';
+        this.elements.refreshInterval.value = this.state.settings.refreshInterval || 5;
+
         // Configurar checkboxes
-        this.elements.excludeSP.checked = this.state.settings.excludedRegions.states.includes('SP');
-        this.elements.excludeSul.checked = this.state.settings.excludedRegions.states.includes('PR') ||
-                                           this.state.settings.excludedRegions.states.includes('SC') ||
-                                           this.state.settings.excludedRegions.states.includes('RS');
-        this.elements.excludeParana.checked = this.state.settings.excludedRegions.states.includes('PR');
-        
+        const excludedStates = this.state.settings.excludedRegions?.states || [];
+        this.elements.excludeSP.checked = excludedStates.includes('SP');
+        this.elements.excludeSul.checked = excludedStates.includes('PR') ||
+                                           excludedStates.includes('SC') ||
+                                           excludedStates.includes('RS');
+        this.elements.excludeParana.checked = excludedStates.includes('PR');
+
         // Atualizar API
         this.api.updateSettings(this.state.settings);
+
+        // Configurar proxy externo se fornecido
+        if (this.state.settings.proxyUrl) {
+            this.api.setExternalProxy(this.state.settings.proxyUrl);
+        }
     }
 
     exportData() {
