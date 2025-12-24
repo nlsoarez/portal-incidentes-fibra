@@ -73,31 +73,52 @@ class IncidentAPI {
                 return this.cachedData;
             }
 
-            const apiUrl = this.getApiUrl();
-            console.log('Fazendo requisição para:', apiUrl);
-
-            // Tentar buscar dados
             let data = null;
             let lastError = null;
 
-            // Tentativa 1: URL configurada (proxy ou direta)
-            try {
-                data = await this.tryFetch(apiUrl);
-            } catch (error) {
-                console.warn('Falha na tentativa principal:', error.message);
-                lastError = error;
+            // Se tem proxy externo configurado, usar ele primeiro
+            if (this.externalProxyUrl) {
+                console.log('Tentando proxy externo:', this.externalProxyUrl);
+                try {
+                    data = await this.tryFetch(this.externalProxyUrl);
+                } catch (error) {
+                    console.warn('Falha no proxy externo:', error.message);
+                    lastError = error;
+                }
             }
 
-            // Se falhou e estamos em hospedagem estática, mostrar erro específico
-            if (!data && !this.environment.supportsProxy && !this.externalProxyUrl) {
-                throw new Error(
-                    'STATIC_HOSTING: Este site está hospedado no GitHub Pages que não suporta PHP. ' +
-                    'Configure um proxy externo nas configurações ou hospede em um servidor com PHP.'
-                );
-            }
-
-            // Se ainda não temos dados, usar dados de exemplo
+            // Se não tem dados ainda, tentar API direta (pode funcionar se CORS estiver habilitado)
             if (!data) {
+                console.log('Tentando API direta:', this.originalApiUrl);
+                try {
+                    data = await this.tryFetch(this.originalApiUrl);
+                    console.log('API direta funcionou!');
+                } catch (error) {
+                    console.warn('Falha na API direta:', error.message);
+                    lastError = error;
+                }
+            }
+
+            // Se ainda não tem dados e ambiente suporta proxy local
+            if (!data && this.environment.supportsProxy) {
+                const localProxyUrl = this.getLocalProxyUrl();
+                console.log('Tentando proxy local:', localProxyUrl);
+                try {
+                    data = await this.tryFetch(localProxyUrl);
+                } catch (error) {
+                    console.warn('Falha no proxy local:', error.message);
+                    lastError = error;
+                }
+            }
+
+            // Se ainda não tem dados, mostrar erro apropriado
+            if (!data) {
+                if (!this.environment.supportsProxy && !this.externalProxyUrl) {
+                    throw new Error(
+                        'STATIC_HOSTING: Não foi possível conectar à API. ' +
+                        'Para usar no GitHub Pages, rode localmente com: php -S localhost:8000'
+                    );
+                }
                 console.warn('Usando dados de exemplo devido a falha na API');
                 return await this.getSampleData();
             }
@@ -120,6 +141,11 @@ class IncidentAPI {
             // Tentar usar dados de exemplo se a API falhar
             return await this.getSampleData();
         }
+    }
+
+    getLocalProxyUrl() {
+        const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
+        return `${baseUrl}/proxy.php`;
     }
 
     async tryFetch(url) {
