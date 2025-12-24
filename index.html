@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal de Monitoramento - Incidentes Fibra</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-satellite-dish me-2"></i>
+                Portal de Monitoramento - Fibra
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#dashboard">
+                            <i class="fas fa-tachometer-alt me-1"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#incidentes">
+                            <i class="fas fa-exclamation-triangle me-1"></i> Incidentes
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#monitoramento">
+                            <i class="fas fa-bell me-1"></i> Alertas
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#configuracoes">
+                            <i class="fas fa-cog me-1"></i> Configurações
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-lg-2">
+                <div class="card sidebar-card">
+                    <div class="card-header bg-info text-white">
+                        <i class="fas fa-filter me-2"></i>Filtros
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Status:</label>
+                            <select class="form-select" id="filter-status">
+                                <option value="all">Todos</option>
+                                <option value="PENDENTE">Pendente</option>
+                                <option value="EM PROGRESSO">Em Progresso</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Regional:</label>
+                            <select class="form-select" id="filter-regional">
+                                <option value="all">Todas</option>
+                                <!-- Carregado dinamicamente -->
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Período:</label>
+                            <select class="form-select" id="filter-period">
+                                <option value="24h">Últimas 24h</option>
+                                <option value="7d">Últimos 7 dias</option>
+                                <option value="30d">Últimos 30 dias</option>
+                                <option value="all">Todo período</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-success w-100" id="apply-filters">
+                            <i class="fas fa-sync-alt me-1"></i> Aplicar Filtros
+                        </button>
+                        <button class="btn btn-outline-secondary w-100 mt-2" id="export-data">
+                            <i class="fas fa-download me-1"></i> Exportar Dados
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Status Summary -->
+                <div class="card mt-3">
+                    <div class="card-header bg-warning text-dark">
+                        <i class="fas fa-chart-pie me-2"></i>Resumo
+                    </div>
+                    <div class="card-body">
+                        <div class="status-summary">
+                            <div class="status-item">
+                                <span class="status-indicator bg-danger"></span>
+                                <span>Pendentes: </span>
+                                <span id="count-pendentes">0</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-indicator bg-warning"></span>
+                                <span>Em Progresso: </span>
+                                <span id="count-progresso">0</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-indicator bg-success"></span>
+                                <span>Total Fibra: </span>
+                                <span id="count-total">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Dashboard -->
+            <div class="col-lg-10">
+                <!-- Dashboard Section -->
+                <section id="dashboard">
+                    <div class="row">
+                        <div class="col-12">
+                            <div class="card">
+                                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                                    <h5 class="mb-0">
+                                        <i class="fas fa-chart-line me-2"></i>Dashboard - Incidentes Fibra
+                                    </h5>
+                                    <div class="last-update">
+                                        <i class="fas fa-clock me-1"></i>
+                                        <span id="last-update-time">Carregando...</span>
+                                    </div>
+                                </div>
+                                <div class="card-body">
+                                    <!-- KPI Cards -->
+                                    <div class="row mb-4">
+                                        <div class="col-md-3">
+                                            <div class="kpi-card bg-danger">
+                                                <i class="fas fa-exclamation-circle fa-2x"></i>
+                                                <h3 id="kpi-pendentes">0</h3>
+                                                <p>Incidentes Pendentes</p>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="kpi-card bg-warning">
+                                                <i class="fas fa-tools fa-2x"></i>
+                                                <h3 id="kpi-progresso">0</h3>
+                                                <p>Em Progresso</p>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="kpi-card bg-info">
+                                                <i class="fas fa-city fa-2x"></i>
+                                                <h3 id="kpi-cidades">0</h3>
+                                                <p>Cidades Afetadas</p>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="kpi-card bg-success">
+                                                <i class="fas fa-history fa-2x"></i>
+                                                <h3 id="kpi-tempo">0h</h3>
+                                                <p>Tempo Médio</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Charts -->
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="chart-card">
+                                                <h6><i class="fas fa-chart-bar me-2"></i>Incidentes por Regional</h6>
+                                                <canvas id="chart-regional"></canvas>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="chart-card">
+                                                <h6><i class="fas fa-chart-pie me-2"></i>Distribuição por Status</h6>
+                                                <canvas id="chart-status"></canvas>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Trend Chart -->
+                                    <div class="row mt-4">
+                                        <div class="col-12">
+                                            <div class="chart-card">
+                                                <h6><i class="fas fa-chart-line me-2"></i>Tendência de Incidentes (Últimos 30 dias)</h6>
+                                                <canvas id="chart-trend"></canvas>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Incidentes Section -->
+                <section id="incidentes" class="mt-4">
+                    <div class="card">
+                        <div class="card-header bg-secondary text-white">
+                            <h5 class="mb-0">
+                                <i class="fas fa-list me-2"></i>Lista de Incidentes de Fibra
+                                <span class="badge bg-light text-dark ms-2" id="incident-count">0</span>
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover" id="incidentes-table">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Cidade</th>
+                                            <th>Regional</th>
+                                            <th>Topologia</th>
+                                            <th>Status</th>
+                                            <th>Início</th>
+                                            <th>Previsão</th>
+                                            <th>Tempo</th>
+                                            <th>Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="incidentes-body">
+                                        <!-- Carregado dinamicamente -->
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mt-3">
+                                <div>
+                                    <span class="text-muted">Mostrando </span>
+                                    <span id="showing-count">0</span>
+                                    <span class="text-muted"> de </span>
+                                    <span id="total-count">0</span>
+                                    <span class="text-muted"> incidentes</span>
+                                </div>
+                                <nav>
+                                    <ul class="pagination pagination-sm" id="pagination">
+                                        <!-- Paginação dinâmica -->
+                                    </ul>
+                                </nav>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Monitoramento Section -->
+                <section id="monitoramento" class="mt-4">
+                    <div class="card">
+                        <div class="card-header bg-warning text-dark">
+                            <h5 class="mb-0">
+                                <i class="fas fa-bell me-2"></i>Monitoramento de Novos Alarmes
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="alert alert-info">
+                                        <i class="fas fa-info-circle me-2"></i>
+                                        <strong>Monitoramento Ativo</strong>
+                                        <p class="mb-0">Verificando novos incidentes a cada 5 minutos</p>
+                                    </div>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="auto-refresh" checked>
+                                        <label class="form-check-label" for="auto-refresh">
+                                            Atualização Automática (5 min)
+                                        </label>
+                                    </div>
+                                    <button class="btn btn-primary mt-3" id="manual-refresh">
+                                        <i class="fas fa-sync-alt me-1"></i> Atualizar Agora
+                                    </button>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="alert-list">
+                                        <h6><i class="fas fa-history me-2"></i>Últimas Atualizações</h6>
+                                        <div id="alert-timeline">
+                                            <!-- Timeline de alertas -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Novos Incidentes -->
+                            <div class="mt-4">
+                                <h6><i class="fas fa-exclamation-triangle me-2 text-danger"></i>Novos Incidentes (Últimas 24h)</h6>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped" id="new-incidents-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Hora</th>
+                                                <th>ID</th>
+                                                <th>Cidade</th>
+                                                <th>Topologia</th>
+                                                <th>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="new-incidents-body">
+                                            <!-- Carregado dinamicamente -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Configurações Section -->
+                <section id="configuracoes" class="mt-4">
+                    <div class="card">
+                        <div class="card-header bg-dark text-white">
+                            <h5 class="mb-0">
+                                <i class="fas fa-cog me-2"></i>Configurações
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>Filtros Geográficos</h6>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="exclude-sp" checked>
+                                        <label class="form-check-label" for="exclude-sp">
+                                            Excluir São Paulo
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="exclude-sul" checked>
+                                        <label class="form-check-label" for="exclude-sul">
+                                            Excluir Região Sul (PR, SC, RS)
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="exclude-parana" checked>
+                                        <label class="form-check-label" for="exclude-parana">
+                                            Excluir Paraná
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>Configurações de API</h6>
+                                    <div class="mb-3">
+                                        <label for="api-url" class="form-label">URL da API:</label>
+                                        <input type="text" class="form-control" id="api-url" 
+                                               value="http://10.29.5.216/scr/sgo_incidentes_abertos.php">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="refresh-interval" class="form-label">Intervalo de Atualização (minutos):</label>
+                                        <input type="number" class="form-control" id="refresh-interval" value="5" min="1" max="60">
+                                    </div>
+                                    <button class="btn btn-success" id="save-settings">
+                                        <i class="fas fa-save me-1"></i> Salvar Configurações
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer mt-5 py-3 bg-light">
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-6">
+                    <span class="text-muted">
+                        <i class="fas fa-code me-1"></i> Portal de Monitoramento - v1.0
+                    </span>
+                </div>
+                <div class="col-md-6 text-end">
+                    <span class="text-muted" id="connection-status">
+                        <i class="fas fa-circle text-success me-1"></i> Conectado
+                    </span>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- App Scripts -->
+    <script src="js/api.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/app.js"></script>
+    
+    <script>
+        // Inicialização quando a página carrega
+        document.addEventListener('DOMContentLoaded', function() {
+            // Iniciar o aplicativo
+            initApp();
+        });
+    </script>
+</body>
+</html>
